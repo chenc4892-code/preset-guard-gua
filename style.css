@@ -1,0 +1,375 @@
+/* ============================================
+   PresetGuard v3.0 - 多内容类型加密保护扩展
+   ============================================ */
+
+/* ---- 通用布局 ---- */
+.pg-section {
+    margin-bottom: 12px;
+}
+
+.pg-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.pg-gap {
+    gap: 8px;
+}
+
+.pg-between {
+    justify-content: space-between;
+}
+
+/* ---- 状态文本 ---- */
+.pg-status {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.85em;
+}
+
+.pg-success {
+    color: #4caf50;
+}
+
+.pg-error {
+    color: #f44336;
+}
+
+.pg-hint {
+    color: var(--SmartThemeQuoteColor, #888);
+    font-size: 0.85em;
+}
+
+/* ---- 徽章 ---- */
+.pg-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 0.8em;
+    background: var(--SmartThemeBorderColor, #555);
+    color: var(--SmartThemeBodyColor, #fff);
+}
+
+.pg-badge-admin {
+    background: #e91e63;
+    color: white;
+}
+
+/* ---- 内容类型徽章 ---- */
+.pg-type-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.pg-type-badge i {
+    margin-right: 2px;
+}
+
+.pg-type-preset {
+    background: rgba(33, 150, 243, 0.25);
+    color: #64b5f6;
+    border: 1px solid rgba(33, 150, 243, 0.4);
+}
+
+.pg-type-theme {
+    background: rgba(156, 39, 176, 0.25);
+    color: #ce93d8;
+    border: 1px solid rgba(156, 39, 176, 0.4);
+}
+
+.pg-type-character {
+    background: rgba(76, 175, 80, 0.25);
+    color: #81c784;
+    border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
+.pg-type-worldbook {
+    background: rgba(255, 152, 0, 0.25);
+    color: #ffb74d;
+    border: 1px solid rgba(255, 152, 0, 0.4);
+}
+
+/* ---- 列表 ---- */
+.pg-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 4px;
+    margin: 6px 0;
+}
+
+.pg-preset-item,
+.pg-installed-item,
+.pg-dialog-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+}
+
+.pg-preset-item:last-child,
+.pg-installed-item:last-child,
+.pg-dialog-item:last-child {
+    border-bottom: none;
+}
+
+.pg-preset-name {
+    font-weight: bold;
+}
+
+.pg-preset-version,
+.pg-version {
+    font-size: 0.85em;
+    opacity: 0.7;
+    margin-left: 6px;
+}
+
+.pg-preset-desc {
+    display: block;
+    opacity: 0.6;
+    font-size: 0.85em;
+}
+
+.pg-preset-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.pg-preset-actions {
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.pg-installed-badge {
+    color: #4caf50;
+    font-size: 0.85em;
+}
+
+.pg-vault-status {
+    font-size: 0.85em;
+    margin-left: 8px;
+}
+
+.pg-active {
+    color: #4caf50;
+}
+
+.pg-inactive {
+    color: #ff9800;
+}
+
+.pg-empty {
+    padding: 16px;
+    text-align: center;
+    opacity: 0.5;
+}
+
+/* ---- 预设面板按钮组 ---- */
+.pg-preset-btn-group {
+    display: flex;
+    gap: 3px;
+    margin: 4px 0;
+    align-items: center;
+}
+
+.pg-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    background: var(--SmartThemeBlurTintColor, transparent);
+    transition: opacity 0.2s;
+}
+
+.pg-icon-btn:hover {
+    opacity: 0.8;
+    background: var(--SmartThemeBorderColor, #555);
+}
+
+/* ---- 模态框 ---- */
+.pg-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.pg-modal {
+    background: var(--SmartThemeBlurTintColor, #1e1e1e);
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.pg-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
+}
+
+.pg-modal-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.pg-modal-close {
+    cursor: pointer;
+    opacity: 0.7;
+    font-size: 1.2em;
+}
+
+.pg-modal-close:hover {
+    opacity: 1;
+}
+
+.pg-modal-body {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.pg-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--SmartThemeBorderColor, #444);
+}
+
+/* ---- 加密配置 ---- */
+.pg-encrypt-config h4 {
+    margin: 12px 0 6px;
+    font-size: 0.95em;
+    opacity: 0.8;
+}
+
+.pg-encrypt-config h4:first-child {
+    margin-top: 0;
+}
+
+.pg-checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+}
+
+.pg-checkbox-row input[type="checkbox"] {
+    margin: 0;
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.pg-checkbox-row span {
+    word-break: break-word;
+}
+
+/* ---- 推送配置 ---- */
+.pg-push-config p {
+    margin: 8px 0;
+}
+
+/* ---- 遮蔽层 ---- */
+.pg-occlusion-wrap {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+}
+
+.pg-occlusion-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.85));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--SmartThemeBodyColor, #ccc);
+    font-size: 14px;
+    z-index: 10;
+    border-radius: 4px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+}
+
+/* ---- 对话框列表 ---- */
+.pg-dialog-list {
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.pg-dialog-item {
+    gap: 10px;
+}
+
+/* ---- 管理员操作网格 ---- */
+.pg-action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.pg-action-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 16px 8px;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    text-align: center;
+}
+
+.pg-action-card:hover {
+    background: var(--SmartThemeBorderColor, #444);
+    border-color: var(--SmartThemeQuoteColor, #666);
+}
+
+.pg-action-card i {
+    font-size: 1.4em;
+    opacity: 0.8;
+}
+
+.pg-action-card span {
+    font-size: 0.85em;
+}
+
+/* ---- 已安装项带类型标记 ---- */
+.pg-installed-item {
+    gap: 6px;
+}
+
+.pg-installed-item .pg-type-badge {
+    flex-shrink: 0;
+}
