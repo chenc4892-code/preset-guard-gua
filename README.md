@@ -1,0 +1,140 @@
+# PresetGuard
+
+**SillyTavern 内容加密保护扩展**
+
+版本：v3.2 | 作者：金瓜瓜 @gua.guagua.uk
+
+---
+
+## 简介
+
+PresetGuard 是为 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 设计的内容加密保护系统。它帮助内容创作者保护自己的作品——包括 AI 预设、角色卡、世界书和自定义主题——在分享给用户使用的同时，防止原始内容被查看、复制或导出。
+
+**一句话概括：** 用户能正常使用你的作品，但看不到也拿不走你的源内容。
+
+## 核心功能
+
+### 内容加密保护
+
+| 内容类型 | 保护范围 |
+|---------|---------|
+| 预设 (Preset) | 系统提示词、越狱提示词等 AI 提示内容 |
+| 角色卡 (Character) | 角色描述、性格、对话示例、正则脚本、绑定的世界书条目 |
+| 世界书 (WorldBook) | 知识库条目内容 |
+| 主题 (Theme) | 自定义 CSS 样式代码 |
+
+- 采用 AES-256-GCM 加密，存储和传输双重加密
+- 受保护字段显示遮蔽层，无法编辑或复制
+- 拦截导出操作，防止内容泄露
+
+### 三级权限体系
+
+| 角色 | 说明 |
+|------|------|
+| 超级管理员 (superadmin) | 服务器拥有者，拥有全部管理权限 |
+| 管理员 (admin) | 内容创作者，管理自己的作品和用户 |
+| 普通用户 (user) | 内容消费者，安装和使用受保护的作品 |
+
+通过邀请码注册机制实现层级管理，用户自动关联到邀请者。
+
+### 内容反馈系统
+
+用户可以对已安装的作品：
+- 发送 emoji 反应（👍 ❤️ 🔥 ⭐ 😕）
+- 撰写文字评论
+
+作者在管理面板的「反馈中心」查看所有反馈汇总和详情。
+
+### 定期访问撤回
+
+作者可设置自动撤回规则：
+- **不使用撤回**：用户 N 天内未下载该内容，自动撤回访问
+- **无反馈撤回**：用户 N 天内未留反馈，自动撤回访问
+
+服务器每小时自动检查，作者可随时手动恢复用户权限。
+
+## 系统架构
+
+```
+创作者 SillyTavern          PresetGuard Server          用户 SillyTavern
+ + PresetGuard 扩展    ←→    (Node.js 服务端)     ←→    + PresetGuard 扩展
+   加密 & 推送作品            存储 & 分发 & 鉴权           安装 & 使用作品
+```
+
+## 技术栈
+
+- **服务端**：Node.js + Express.js，JWT 认证，JSON 文件存储
+- **客户端**：SillyTavern 扩展插件（jQuery），与酒馆 UI 深度集成
+- **加密**：AES-256-GCM（存储层 + 传输层双重加密）
+- **管理面板**：自包含单页应用（admin.html）
+
+## 快速开始
+
+### 部署服务端
+
+```bash
+# 1. 进入服务端目录
+cd preset-guard/server/
+
+# 2. 安装依赖
+npm install
+
+# 3. 创建配置文件
+cp .env.example .env
+# 编辑 .env，填入 JWT_SECRET、ENCRYPT_KEY、ADMIN_BOOTSTRAP_CODE
+
+# 4. 启动服务器
+npm start
+```
+
+### 安装扩展
+
+将 `preset-guard/` 文件夹放入：
+
+```
+SillyTavern/public/scripts/extensions/third-party/preset-guard/
+```
+
+重启 SillyTavern，在扩展面板配置服务器地址并登录。
+
+### 详细教程
+
+完整的部署步骤和使用说明请参阅 [使用手册](server/使用手册.md)。
+
+## 项目结构
+
+```
+preset-guard/
+├── index.js           # 客户端扩展主程序
+├── style.css          # 扩展样式
+├── manifest.json      # 扩展清单
+├── LICENSE            # 专有许可协议
+├── README.md          # 本文件
+└── server/
+    ├── server.js      # 服务端主程序
+    ├── admin.html     # 管理面板
+    ├── package.json   # 服务端依赖
+    ├── .env.example   # 配置模板
+    └── 使用手册.md     # 部署与使用教程
+```
+
+## 版本历史
+
+| 版本 | 主要更新 |
+|------|---------|
+| v3.2 | 内容反馈系统（emoji + 评论）、定期访问撤回、管理面板 UI 重构 |
+| v3.1 | 三级角色系统、作者关注机制、内容按作者分组 |
+| v3.0 | 多内容类型支持（角色卡/世界书/主题）、加密配置 UI、管理面板 |
+| v2.x | 预设加密保护基础功能 |
+
+## 许可协议
+
+**本软件为专有软件，保留所有权利。**
+
+未经作者明确书面授权，不得复制、分发、修改或用于商业用途。仅持有有效邀请码的授权用户可在个人设备上使用本软件。详见 [LICENSE](LICENSE)。
+
+## 联系
+
+金瓜瓜 @gua.guagua.uk
+
+项目主页：https://github.com/chenc4892-code/preset-guard-gua.git
