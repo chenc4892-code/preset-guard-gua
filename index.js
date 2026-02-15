@@ -494,6 +494,24 @@ async function apiPromoteUser(userId) {
     });
 }
 
+async function apiFeedbackReact(contentId, emoji) {
+    return pgFetch(`/api/feedback/${contentId}/react`, {
+        method: 'POST',
+        body: { emoji },
+    });
+}
+
+async function apiFeedbackComment(contentId, text) {
+    return pgFetch(`/api/feedback/${contentId}/comment`, {
+        method: 'POST',
+        body: { text },
+    });
+}
+
+async function apiGetFeedback(contentId) {
+    return pgFetch(`/api/feedback/${contentId}`);
+}
+
 // ================================================================
 //  Vault 管理
 // ================================================================
@@ -2606,6 +2624,10 @@ async function refreshContentList() {
                     </div>
                     <div class="pg-preset-actions">
                         ${installed
+                            ? `<div class="menu_button menu_button_icon pg-feedback-btn interactable" title="反馈" data-id="${item.id}"><i class="fa-solid fa-comment-dots"></i></div>`
+                            : ''
+                        }
+                        ${installed
                             ? (hasUpdate
                                 ? '<div class="menu_button menu_button_icon pg-install-btn interactable" title="更新"><i class="fa-solid fa-download"></i></div>'
                                 : '<span class="pg-installed-badge">✓ 已安装</span>')
@@ -2614,6 +2636,11 @@ async function refreshContentList() {
                     </div>
                 </div>
             `);
+
+            $item.find('.pg-feedback-btn').on('click', async function (e) {
+                e.stopPropagation();
+                showFeedbackModal(item.id, item.name);
+            });
 
             $item.find('.pg-install-btn').on('click', async function () {
                 try {
@@ -3612,6 +3639,83 @@ function showAdminActionsDialog() {
                 if (action === 'encrypt') showEncryptionDialog(type);
                 else if (action === 'push') showPushDialog(type);
             }, 200);
+        });
+    });
+}
+
+// ================================================================
+//  UI: 反馈弹窗
+// ================================================================
+async function showFeedbackModal(contentId, contentName) {
+    let feedbackData;
+    try {
+        feedbackData = await apiGetFeedback(contentId);
+    } catch (e) {
+        toastr.error('获取反馈数据失败: ' + e.message);
+        return;
+    }
+
+    const emojis = ['👍', '❤️', '🔥', '⭐', '😕'];
+    const myReaction = feedbackData.myReaction;
+    const summary = feedbackData.reactionSummary || {};
+
+    const emojiHtml = emojis.map(emoji => {
+        const count = summary[emoji] || 0;
+        const selected = myReaction === emoji ? 'selected' : '';
+        return `<div class="pg-emoji-btn ${selected}" data-emoji="${emoji}">
+            ${emoji}
+            <span class="pg-emoji-count">${count}</span>
+        </div>`;
+    }).join('');
+
+    const html = `
+        <div class="pg-feedback-content">
+            <p class="pg-hint">为「${escapeHtml(contentName)}」留下反馈</p>
+            <div class="pg-emoji-row">${emojiHtml}</div>
+            <div class="pg-comment-area">
+                <textarea id="pg-feedback-comment" placeholder="写下你的评论（最多500字）" maxlength="500"></textarea>
+                <div class="pg-comment-submit-row">
+                    <div class="menu_button menu_button_icon pg-comment-submit interactable">
+                        <i class="fa-solid fa-paper-plane"></i> 提交评论
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    showPGModal('内容反馈', html, ($modal) => {
+        // emoji 点击
+        $modal.on('click', '.pg-emoji-btn', async function () {
+            const emoji = $(this).data('emoji');
+            try {
+                await apiFeedbackReact(contentId, emoji);
+                // 刷新反馈数据
+                const updated = await apiGetFeedback(contentId);
+                const newSummary = updated.reactionSummary || {};
+                $modal.find('.pg-emoji-btn').each(function () {
+                    const e = $(this).data('emoji');
+                    $(this).toggleClass('selected', updated.myReaction === e);
+                    $(this).find('.pg-emoji-count').text(newSummary[e] || 0);
+                });
+            } catch (e) {
+                toastr.error('提交反应失败: ' + e.message);
+            }
+        });
+
+        // 评论提交
+        $modal.on('click', '.pg-comment-submit', async function () {
+            const text = $modal.find('#pg-feedback-comment').val().trim();
+            if (!text) {
+                toastr.warning('请输入评论内容');
+                return;
+            }
+            try {
+                await apiFeedbackComment(contentId, text);
+                $modal.find('#pg-feedback-comment').val('');
+                toastr.success('评论已提交');
+            } catch (e) {
+                toastr.error('提交评论失败: ' + e.message);
+            }
         });
     });
 }
