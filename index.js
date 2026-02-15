@@ -131,8 +131,13 @@ function extractSessionKey(jwtToken) {
     }
 }
 
+function isSuperAdmin() {
+    return getSettings().user?.role === 'superadmin';
+}
+
 function isAdmin() {
-    return getSettings().user?.role === 'admin';
+    const role = getSettings().user?.role;
+    return role === 'admin' || role === 'superadmin';
 }
 
 function isLoggedIn() {
@@ -463,6 +468,30 @@ async function apiReportEvent(event, details = {}) {
     } catch {
         // 静默失败
     }
+}
+
+async function apiFollowAuthor(inviteCode) {
+    return pgFetch('/api/auth/follow', {
+        method: 'POST',
+        body: { inviteCode },
+    });
+}
+
+async function apiUnfollowAuthor(authorId) {
+    return pgFetch('/api/auth/unfollow', {
+        method: 'POST',
+        body: { authorId },
+    });
+}
+
+async function apiGetMe() {
+    return pgFetch('/api/auth/me');
+}
+
+async function apiPromoteUser(userId) {
+    return pgFetch(`/api/users/${userId}/promote`, {
+        method: 'POST',
+    });
 }
 
 // ================================================================
@@ -2340,6 +2369,21 @@ function renderSettingsPanel() {
                     <label>已安装内容</label>
                     <div id="pg-installed-list" class="pg-list"></div>
                 </div>
+
+                <!-- 关注作者（user 角色专属） -->
+                <div id="pg-follow-section" class="pg-section" style="display:none">
+                    <label>关注的作者</label>
+                    <div id="pg-followed-authors" class="pg-list"></div>
+                    <div class="pg-row pg-gap" style="margin-top:6px">
+                        <input id="pg-follow-code" type="text" class="text_pole wide100p"
+                               placeholder="输入作者邀请码" />
+                        <div id="pg-btn-follow" class="menu_button menu_button_icon interactable"
+                             title="关注作者">
+                            <i class="fa-solid fa-user-plus"></i>
+                            <span>关注</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>`;
@@ -2417,6 +2461,60 @@ function bindSettingsEvents() {
 
     $('#pg-btn-refresh').on('click', () => refreshContentList());
     $('#pg-content-type-filter').on('change', () => refreshContentList());
+
+    $('#pg-btn-follow').on('click', async () => {
+        const code = $('#pg-follow-code').val().trim();
+        if (!code) {
+            toastr.warning('请输入作者邀请码');
+            return;
+        }
+        try {
+            const data = await apiFollowAuthor(code);
+            toastr.success(`已关注作者: ${data.authorUsername}`);
+            $('#pg-follow-code').val('');
+            refreshFollowedAuthors();
+            refreshContentList();
+            await populateVault();
+        } catch (e) {
+            toastr.error('关注失败: ' + e.message);
+        }
+    });
+}
+
+async function refreshFollowedAuthors() {
+    const $list = $('#pg-followed-authors').empty();
+    try {
+        const me = await apiGetMe();
+        if (!me.authorAccess || me.authorAccess.length === 0) {
+            $list.html('<div class="pg-empty">暂未关注任何作者</div>');
+            return;
+        }
+        for (const author of me.authorAccess) {
+            const $row = $(`
+                <div class="pg-followed-author-item pg-row pg-between">
+                    <span><i class="fa-solid fa-user-pen"></i> ${escapeHtml(author.authorUsername)}</span>
+                    <div class="pg-btn-unfollow menu_button menu_button_icon interactable"
+                         data-author-id="${author.authorId}" title="取消关注">
+                        <i class="fa-solid fa-user-minus"></i>
+                    </div>
+                </div>
+            `);
+            $row.find('.pg-btn-unfollow').on('click', async function () {
+                const authorId = $(this).data('author-id');
+                try {
+                    await apiUnfollowAuthor(authorId);
+                    toastr.info('已取消关注');
+                    refreshFollowedAuthors();
+                    refreshContentList();
+                } catch (e) {
+                    toastr.error('取消关注失败: ' + e.message);
+                }
+            });
+            $list.append($row);
+        }
+    } catch (e) {
+        $list.html(`<div class="pg-error">获取失败: ${escapeHtml(e.message)}</div>`);
+    }
 }
 
 function updateSettingsUI() {
@@ -2430,9 +2528,16 @@ function updateSettingsUI() {
 
     if (loggedIn) {
         $('#pg-display-name').text(settings.user?.username || '未知');
+        const roleLabels = { superadmin: '超级管理员', admin: '管理员', user: '用户' };
+        const role = settings.user?.role || 'user';
         $('#pg-display-role')
-            .text(settings.user?.role === 'admin' ? '管理员' : '用户')
-            .toggleClass('pg-badge-admin', settings.user?.role === 'admin');
+            .text(roleLabels[role] || '用户')
+            .toggleClass('pg-badge-admin', role === 'admin')
+            .toggleClass('pg-badge-superadmin', role === 'superadmin');
+        $('#pg-follow-section').toggle(role === 'user' || role === 'admin');
+        if (role === 'user' || role === 'admin') {
+            refreshFollowedAuthors();
+        }
         refreshContentList();
         refreshInstalledList();
     }
@@ -2461,15 +2566,36 @@ async function refreshContentList() {
         }
 
         const settings = getSettings();
+        const currentUsername = settings.user?.username;
 
+        // 按作者分组
+        const authorGroups = new Map();
         for (const item of items) {
+            const authorKey = item.createdBy || '未知作者';
+            if (!authorGroups.has(authorKey)) {
+                authorGroups.set(authorKey, []);
+            }
+            authorGroups.get(authorKey).push(item);
+        }
+
+        for (const [authorName, groupItems] of authorGroups) {
+            const isSelf = authorName === currentUsername;
+            const label = isSelf ? `${escapeHtml(authorName)} (我)` : escapeHtml(authorName);
+            $list.append(`
+                <div class="pg-author-group-header">
+                    <i class="fa-solid fa-user-pen"></i> ${label}
+                    <span class="pg-author-count">${groupItems.length} 项</span>
+                </div>
+            `);
+
+            for (const item of groupItems) {
             const type = item.type || 'preset';
             const typeDef = CONTENT_TYPES[type] || CONTENT_TYPES.preset;
             const installed = settings.installedContent[type]?.[item.id];
             const hasUpdate = installed && installed.version !== item.version;
 
             const $item = $(`
-                <div class="pg-preset-item" data-id="${item.id}" data-type="${type}">
+                <div class="pg-preset-item pg-grouped-item" data-id="${item.id}" data-type="${type}">
                     <div class="pg-preset-info">
                         <span class="pg-type-badge pg-type-${type}">
                             <i class="fa-solid ${typeDef.icon}"></i> ${typeDef.label}
@@ -2513,6 +2639,7 @@ async function refreshContentList() {
             });
 
             $list.append($item);
+            }
         }
     } catch (e) {
         console.error('[PresetGuard] 获取内容列表失败:', e);
@@ -2869,6 +2996,10 @@ function showPresetEncryptionDialog() {
     let html = '<div class="pg-encrypt-config">';
 
     html += '<h4>提示词条目 (Prompts)</h4>';
+    html += '<div class="pg-select-all-row">'
+        + '<button type="button" class="pg-select-all-btn" data-target="pg-encrypt-prompt">全选</button>'
+        + '<button type="button" class="pg-deselect-all-btn" data-target="pg-encrypt-prompt">全不选</button>'
+        + '</div>';
     const prompts = currentPreset.prompts || [];
     let promptCount = 0;
     for (const prompt of prompts) {
@@ -2890,6 +3021,10 @@ function showPresetEncryptionDialog() {
     }
 
     html += '<h4>根级文本字段</h4>';
+    html += '<div class="pg-select-all-row">'
+        + '<button type="button" class="pg-select-all-btn" data-target="pg-encrypt-root">全选</button>'
+        + '<button type="button" class="pg-deselect-all-btn" data-target="pg-encrypt-root">全不选</button>'
+        + '</div>';
     let rootCount = 0;
     for (const field of ROOT_TEXT_FIELDS) {
         if (currentPreset[field] === undefined) continue;
@@ -2997,6 +3132,10 @@ async function showCharacterEncryptionDialog() {
 
     // ---- 文本字段 ----
     html += '<h4>角色卡文本字段</h4>';
+    html += '<div class="pg-select-all-row">'
+        + '<button type="button" class="pg-select-all-btn" data-target="pg-encrypt-field">全选</button>'
+        + '<button type="button" class="pg-deselect-all-btn" data-target="pg-encrypt-field">全不选</button>'
+        + '</div>';
     for (const field of CHARACTER_TEXT_FIELDS) {
         const isChecked = currentEncrypted.fields?.includes(field.key);
         html += `
@@ -3015,6 +3154,10 @@ async function showCharacterEncryptionDialog() {
         const entryList = Array.isArray(cbEntries) ? cbEntries : Object.values(cbEntries);
         html += `<h4>角色世界书 (共 ${entryList.length} 条)</h4>`;
         if (entryList.length > 0) {
+            html += '<div class="pg-select-all-row">'
+                + '<button type="button" class="pg-select-all-btn" data-target="pg-encrypt-cb-entry">全选</button>'
+                + '<button type="button" class="pg-deselect-all-btn" data-target="pg-encrypt-cb-entry">全不选</button>'
+                + '</div>';
             for (const entry of entryList) {
                 const uid = entry.uid ?? entry.id ?? 0;
                 const title = entry.comment || entry.key?.[0] || `条目 ${uid}`;
@@ -3039,6 +3182,10 @@ async function showCharacterEncryptionDialog() {
     const regexScripts = fullCharData.extensions?.regex_scripts;
     if (Array.isArray(regexScripts) && regexScripts.length > 0) {
         html += `<h4>角色正则脚本 (共 ${regexScripts.length} 条)</h4>`;
+        html += '<div class="pg-select-all-row">'
+            + '<button type="button" class="pg-select-all-btn" data-target="pg-encrypt-regex">全选</button>'
+            + '<button type="button" class="pg-deselect-all-btn" data-target="pg-encrypt-regex">全不选</button>'
+            + '</div>';
         for (let i = 0; i < regexScripts.length; i++) {
             const script = regexScripts[i];
             const scriptName = script.scriptName || script.description || `脚本 ${i}`;
@@ -3138,6 +3285,13 @@ async function showWorldBookEncryptionDialog() {
                     $entries.append('<div class="pg-hint">此世界书没有条目</div>');
                     return;
                 }
+
+                $entries.append(
+                    '<div class="pg-select-all-row">'
+                    + '<button type="button" class="pg-select-all-btn" data-target="pg-encrypt-entry">全选</button>'
+                    + '<button type="button" class="pg-deselect-all-btn" data-target="pg-encrypt-entry">全不选</button>'
+                    + '</div>'
+                );
 
                 for (const uid of sortedUids) {
                     const entry = entries[uid];
@@ -3505,6 +3659,16 @@ function showPGModal(title, contentHtml, onRender, onSave) {
     if (onRender) {
         onRender($modal);
     }
+
+    // 全选/全不选按钮通用绑定
+    $modal.on('click', '.pg-select-all-btn', function () {
+        const target = $(this).data('target');
+        $modal.find('.' + target).prop('checked', true);
+    });
+    $modal.on('click', '.pg-deselect-all-btn', function () {
+        const target = $(this).data('target');
+        $modal.find('.' + target).prop('checked', false);
+    });
 }
 
 function closePGModal() {

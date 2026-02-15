@@ -1,5 +1,5 @@
 /* ============================================
-   PresetGuard v3.0 - 多内容类型加密保护扩展
+   PresetGuard v3.1 - 多内容类型加密保护扩展
    ============================================ */
 
 /* ---- 通用布局 ---- */
@@ -372,4 +372,78 @@
 
 .pg-installed-item .pg-type-badge {
     flex-shrink: 0;
+}
+
+/* ---- 超管徽章 ---- */
+.pg-badge-superadmin {
+    background: #ff9800;
+    color: #000;
+}
+
+/* ---- 作者分组标题 ---- */
+.pg-author-group-header {
+    padding: 8px 10px;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: var(--SmartThemeQuoteColor, #aaa);
+    background: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.05));
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.pg-author-group-header i {
+    margin-right: 4px;
+    opacity: 0.7;
+}
+
+.pg-author-count {
+    font-weight: normal;
+    font-size: 0.85em;
+    opacity: 0.6;
+}
+
+.pg-grouped-item {
+    padding-left: 18px;
+}
+
+/* ---- 全选/全不选按钮行 ---- */
+.pg-select-all-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.pg-select-all-row button {
+    padding: 2px 10px;
+    font-size: 0.8em;
+    border: 1px solid var(--SmartThemeBorderColor, #555);
+    border-radius: 4px;
+    background: var(--SmartThemeBlurTintColor, transparent);
+    color: var(--SmartThemeBodyColor, #ccc);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.pg-select-all-row button:hover {
+    background: var(--SmartThemeBorderColor, #555);
+}
+
+/* ---- 关注作者区块 ---- */
+.pg-followed-author-item {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+}
+
+.pg-followed-author-item:last-child {
+    border-bottom: none;
+}
+
+.pg-followed-author-item i {
+    margin-right: 4px;
+    opacity: 0.7;
 }
