@@ -63,29 +63,11 @@ PresetGuard 是为 [SillyTavern](https://github.com/SillyTavern/SillyTavern) 设
 
 ## 技术栈
 
-- **服务端**：Node.js + Express.js，JWT 认证，JSON 文件存储
 - **客户端**：SillyTavern 扩展插件（jQuery），与酒馆 UI 深度集成
 - **加密**：AES-256-GCM（存储层 + 传输层双重加密）
 - **管理面板**：自包含单页应用（admin.html）
 
-## 快速开始
 
-### 部署服务端
-
-```bash
-# 1. 进入服务端目录
-cd preset-guard/server/
-
-# 2. 安装依赖
-npm install
-
-# 3. 创建配置文件
-cp .env.example .env
-# 编辑 .env，填入 JWT_SECRET、ENCRYPT_KEY、ADMIN_BOOTSTRAP_CODE
-
-# 4. 启动服务器
-npm start
-```
 
 ### 安装扩展
 
@@ -110,12 +92,7 @@ preset-guard/
 ├── manifest.json      # 扩展清单
 ├── LICENSE            # 专有许可协议
 ├── README.md          # 本文件
-└── server/
-    ├── server.js      # 服务端主程序
-    ├── admin.html     # 管理面板
-    ├── package.json   # 服务端依赖
-    ├── .env.example   # 配置模板
-    └── 使用手册.md     # 部署与使用教程
+
 ```
 
 ## 版本历史
