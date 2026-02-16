@@ -2168,7 +2168,7 @@ function installExportGuard() {
         const presetExportBtn = e.target.closest('#export_oai_preset, .export_preset');
         if (presetExportBtn) {
             const pgData = getCurrentPresetPGData();
-            if (pgData?.isProtected && !isAdmin()) {
+            if (pgData?.isProtected && !isSuperAdmin()) {
                 e.stopImmediatePropagation();
                 e.preventDefault();
                 toastr.warning('此预设受 PresetGuard 保护，不允许导出');
@@ -2185,7 +2185,7 @@ function installExportGuard() {
             if (charIndex !== undefined && charIndex >= 0) {
                 const charData = context.characters[charIndex];
                 const pgMeta = charData?.data?.extensions?.presetGuard;
-                if (pgMeta?.isProtected && !isAdmin()) {
+                if (pgMeta?.isProtected && !isSuperAdmin()) {
                     e.stopImmediatePropagation();
                     e.preventDefault();
                     toastr.warning('此角色卡受 PresetGuard 保护，不允许导出');
@@ -2199,7 +2199,7 @@ function installExportGuard() {
         const worldExportBtn = e.target.closest('#world_popup_export');
         if (worldExportBtn) {
             // 检查当前世界书是否受保护
-            if (isWorldBookProtected() && !isAdmin()) {
+            if (isWorldBookProtected() && !isSuperAdmin()) {
                 e.stopImmediatePropagation();
                 e.preventDefault();
                 toastr.warning('此世界书受 PresetGuard 保护，不允许导出');
@@ -2211,7 +2211,7 @@ function installExportGuard() {
         // 主题导出
         const themeExportBtn = e.target.closest('#ui_preset_export_button');
         if (themeExportBtn) {
-            if (isCurrentThemeProtected() && !isAdmin()) {
+            if (isCurrentThemeProtected() && !isSuperAdmin()) {
                 e.stopImmediatePropagation();
                 e.preventDefault();
                 toastr.warning('此主题受 PresetGuard 保护，不允许导出');
@@ -2255,7 +2255,7 @@ function handleExportReady(preset) {
     const contentId = pgData.contentId || pgData.presetId;
     const encryptedFields = pgData.encryptedFields || {};
 
-    if (isAdmin() && vault[contentId]) {
+    if (isSuperAdmin() && vault[contentId]) {
         if (encryptedFields.prompts && preset.prompts) {
             for (const identifier of encryptedFields.prompts) {
                 const prompt = preset.prompts.find(p => p.identifier === identifier);
@@ -2726,12 +2726,20 @@ function injectPresetButtons() {
     // 加密管理
     $('#pg-btn-encrypt').on('click', () => {
         if (!isAdmin()) return;
+        if (getCurrentPresetPGData()?.isProtected && !isSuperAdmin()) {
+            toastr.warning('不能修改他人受保护预设的加密配置');
+            return;
+        }
         showEncryptionDialog('preset');
     });
 
     // 推送
     $('#pg-btn-push').on('click', () => {
         if (!isAdmin()) return;
+        if (getCurrentPresetPGData()?.isProtected && !isSuperAdmin()) {
+            toastr.warning('不能推送他人受保护的预设');
+            return;
+        }
         showPushDialog('preset');
     });
 }
@@ -2784,11 +2792,23 @@ function injectCharacterButtons() {
 
     $('#pg-char-encrypt').on('click', () => {
         if (!isAdmin()) return;
+        const context = getContext();
+        const charData = context.characters?.[context.characterId];
+        if (charData?.data?.extensions?.presetGuard?.isProtected && !isSuperAdmin()) {
+            toastr.warning('不能修改他人受保护角色卡的加密配置');
+            return;
+        }
         showEncryptionDialog('character');
     });
 
     $('#pg-char-push').on('click', () => {
         if (!isAdmin()) return;
+        const context = getContext();
+        const charData = context.characters?.[context.characterId];
+        if (charData?.data?.extensions?.presetGuard?.isProtected && !isSuperAdmin()) {
+            toastr.warning('不能推送他人受保护的角色卡');
+            return;
+        }
         showPushDialog('character');
     });
 }
@@ -2830,11 +2850,19 @@ function injectWorldBookButtons() {
 
     $('#pg-wb-encrypt').on('click', () => {
         if (!isAdmin()) return;
+        if (isWorldBookProtected() && !isSuperAdmin()) {
+            toastr.warning('不能修改他人受保护世界书的加密配置');
+            return;
+        }
         showEncryptionDialog('worldbook');
     });
 
     $('#pg-wb-push').on('click', () => {
         if (!isAdmin()) return;
+        if (isWorldBookProtected() && !isSuperAdmin()) {
+            toastr.warning('不能推送他人受保护的世界书');
+            return;
+        }
         showPushDialog('worldbook');
     });
 }
@@ -2876,11 +2904,19 @@ function injectThemeButtons() {
 
     $('#pg-theme-encrypt').on('click', () => {
         if (!isAdmin()) return;
+        if (isCurrentThemeProtected() && !isSuperAdmin()) {
+            toastr.warning('不能修改他人受保护主题的加密配置');
+            return;
+        }
         showEncryptionDialog('theme');
     });
 
     $('#pg-theme-push').on('click', () => {
         if (!isAdmin()) return;
+        if (isCurrentThemeProtected() && !isSuperAdmin()) {
+            toastr.warning('不能推送他人受保护的主题');
+            return;
+        }
         showPushDialog('theme');
     });
 }
@@ -2888,12 +2924,23 @@ function injectThemeButtons() {
 function updatePresetButtonsVisibility() {
     const loggedIn = isLoggedIn();
     const admin = isAdmin();
+    const superAdmin = isSuperAdmin();
     // 按钮组容器
     $('#pg-preset-btns').toggle(loggedIn);
     // 角色卡/世界书的独立按钮
     $('.pg-loggedin-btn').toggle(loggedIn);
-    // 管理员专属按钮
-    $('.pg-admin-only').toggle(admin);
+
+    // 预设加密/推送：管理员可见，但当前预设是他人受保护内容时隐藏
+    const pgData = getCurrentPresetPGData();
+    const presetIsOthers = !!(pgData?.isProtected) && !superAdmin;
+    $('#pg-btn-encrypt').toggle(admin && !presetIsOthers);
+    $('#pg-btn-push').toggle(admin && !presetIsOthers);
+
+    // 角色卡/世界书/主题的加密推送按钮：管理员角色基础可见
+    // （各自的点击处理器内会进一步判断归属）
+    $('#pg-char-encrypt, #pg-char-push').toggle(admin);
+    $('#pg-wb-encrypt, #pg-wb-push').toggle(admin);
+    $('#pg-theme-encrypt, #pg-theme-push').toggle(admin);
 }
 
 // ================================================================
@@ -3867,8 +3914,8 @@ function applyOcclusion() {
     const pgData = getCurrentPresetPGData();
     const presetProtected = pgData?.isProtected;
 
-    // 跳过管理员
-    if (isAdmin()) return;
+    // 跳过超级管理员（普通管理员不跳过，保护其他作者内容）
+    if (isSuperAdmin()) return;
 
     // 检查是否有任何受保护内容
     const hasProtected = presetProtected || getAllInstalledCount() > 0;
