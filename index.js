@@ -124,7 +124,9 @@ function hexToBytes(hex) {
 
 function extractSessionKey(jwtToken) {
     try {
-        const payload = JSON.parse(atob(jwtToken.split('.')[1]));
+        const base64Url = jwtToken.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(base64));
         return payload.sessionKey;
     } catch {
         return null;
@@ -494,17 +496,10 @@ async function apiPromoteUser(userId) {
     });
 }
 
-async function apiFeedbackReact(contentId, emoji) {
-    return pgFetch(`/api/feedback/${contentId}/react`, {
+async function apiFeedbackSubmit(contentId, { emoji, comment, messageContent }) {
+    return pgFetch(`/api/feedback/${contentId}/submit`, {
         method: 'POST',
-        body: { emoji },
-    });
-}
-
-async function apiFeedbackComment(contentId, text) {
-    return pgFetch(`/api/feedback/${contentId}/comment`, {
-        method: 'POST',
-        body: { text },
+        body: { emoji, comment, messageContent },
     });
 }
 
@@ -2624,10 +2619,6 @@ async function refreshContentList() {
                     </div>
                     <div class="pg-preset-actions">
                         ${installed
-                            ? `<div class="menu_button menu_button_icon pg-feedback-btn interactable" title="反馈" data-id="${item.id}"><i class="fa-solid fa-comment-dots"></i></div>`
-                            : ''
-                        }
-                        ${installed
                             ? (hasUpdate
                                 ? '<div class="menu_button menu_button_icon pg-install-btn interactable" title="更新"><i class="fa-solid fa-download"></i></div>'
                                 : '<span class="pg-installed-badge">✓ 已安装</span>')
@@ -2636,11 +2627,6 @@ async function refreshContentList() {
                     </div>
                 </div>
             `);
-
-            $item.find('.pg-feedback-btn').on('click', async function (e) {
-                e.stopPropagation();
-                showFeedbackModal(item.id, item.name);
-            });
 
             $item.find('.pg-install-btn').on('click', async function () {
                 try {
@@ -3644,79 +3630,134 @@ function showAdminActionsDialog() {
 }
 
 // ================================================================
-//  UI: 反馈弹窗
+//  UI: 聊天消息反馈按钮注入
 // ================================================================
-async function showFeedbackModal(contentId, contentName) {
-    let feedbackData;
-    try {
-        feedbackData = await apiGetFeedback(contentId);
-    } catch (e) {
-        toastr.error('获取反馈数据失败: ' + e.message);
+
+/**
+ * 获取所有已安装的 PG 内容列表（用于反馈内容选择）
+ */
+function getInstalledContentList() {
+    const ic = getSettings().installedContent;
+    const list = [];
+    for (const [type, contents] of Object.entries(ic)) {
+        const typeDef = CONTENT_TYPES[type];
+        if (!typeDef) continue;
+        for (const [contentId, info] of Object.entries(contents)) {
+            list.push({
+                id: contentId,
+                type,
+                typeLabel: typeDef.label,
+                name: info.localName || info.name || contentId,
+            });
+        }
+    }
+    return list;
+}
+
+/**
+ * 向聊天消息注入 PG 反馈按钮
+ */
+function injectChatFeedbackButtons() {
+    if (!isLoggedIn()) return;
+    const installed = getInstalledContentList();
+    if (installed.length === 0) return;
+
+    $('#chat .mes[is_user="false"]').each(function () {
+        const $mes = $(this);
+        if ($mes.find('.pg_mes_feedback').length) return;
+        const $extraButtons = $mes.find('.extraMesButtons');
+        if ($extraButtons.length) {
+            $extraButtons.append(
+                '<div title="PG 反馈" class="mes_button pg_mes_feedback fa-solid fa-comment-dots"></div>',
+            );
+        }
+    });
+}
+
+/**
+ * 聊天消息反馈弹窗（compose-then-send 模式）
+ */
+function showChatFeedbackModal(messageText) {
+    const installed = getInstalledContentList();
+    if (installed.length === 0) {
+        toastr.warning('没有已安装的 PG 保护内容');
         return;
     }
 
-    const emojis = ['👍', '❤️', '🔥', '⭐', '😕'];
-    const myReaction = feedbackData.myReaction;
-    const summary = feedbackData.reactionSummary || {};
+    // 截取消息预览（前200字）
+    const preview = messageText.length > 200
+        ? messageText.substring(0, 200) + '...'
+        : messageText;
 
-    const emojiHtml = emojis.map(emoji => {
-        const count = summary[emoji] || 0;
-        const selected = myReaction === emoji ? 'selected' : '';
-        return `<div class="pg-emoji-btn ${selected}" data-emoji="${emoji}">
-            ${emoji}
-            <span class="pg-emoji-count">${count}</span>
-        </div>`;
-    }).join('');
+    const emojis = ['👍', '❤️', '🔥', '⭐', '😕'];
+
+    const contentOptions = installed.map((c, i) =>
+        `<option value="${c.id}" ${i === 0 ? 'selected' : ''}>[${c.typeLabel}] ${escapeHtml(c.name)}</option>`,
+    ).join('');
+
+    const emojiHtml = emojis.map(emoji =>
+        `<div class="pg-emoji-btn" data-emoji="${emoji}">${emoji}</div>`,
+    ).join('');
 
     const html = `
         <div class="pg-feedback-content">
-            <p class="pg-hint">为「${escapeHtml(contentName)}」留下反馈</p>
-            <div class="pg-emoji-row">${emojiHtml}</div>
-            <div class="pg-comment-area">
-                <textarea id="pg-feedback-comment" placeholder="写下你的评论（最多500字）" maxlength="500"></textarea>
-                <div class="pg-comment-submit-row">
-                    <div class="menu_button menu_button_icon pg-comment-submit interactable">
-                        <i class="fa-solid fa-paper-plane"></i> 提交评论
-                    </div>
-                </div>
+            <div class="pg-feedback-section">
+                <label class="pg-label">反馈对象</label>
+                <select id="pg-feedback-target" class="pg-select">${contentOptions}</select>
+            </div>
+            <div class="pg-feedback-section">
+                <label class="pg-label">相关消息</label>
+                <div class="pg-message-preview">${escapeHtml(preview)}</div>
+            </div>
+            <div class="pg-feedback-section">
+                <label class="pg-label">反应</label>
+                <div class="pg-emoji-row">${emojiHtml}</div>
+            </div>
+            <div class="pg-feedback-section">
+                <label class="pg-label">评论 <span class="pg-hint-text">（选填，最多500字）</span></label>
+                <textarea id="pg-feedback-comment" placeholder="写下你的反馈..." maxlength="500"></textarea>
             </div>
         </div>
     `;
 
-    showPGModal('内容反馈', html, ($modal) => {
-        // emoji 点击
-        $modal.on('click', '.pg-emoji-btn', async function () {
-            const emoji = $(this).data('emoji');
-            try {
-                await apiFeedbackReact(contentId, emoji);
-                // 刷新反馈数据
-                const updated = await apiGetFeedback(contentId);
-                const newSummary = updated.reactionSummary || {};
-                $modal.find('.pg-emoji-btn').each(function () {
-                    const e = $(this).data('emoji');
-                    $(this).toggleClass('selected', updated.myReaction === e);
-                    $(this).find('.pg-emoji-count').text(newSummary[e] || 0);
-                });
-            } catch (e) {
-                toastr.error('提交反应失败: ' + e.message);
-            }
-        });
+    let selectedEmoji = null;
 
-        // 评论提交
-        $modal.on('click', '.pg-comment-submit', async function () {
-            const text = $modal.find('#pg-feedback-comment').val().trim();
-            if (!text) {
-                toastr.warning('请输入评论内容');
-                return;
-            }
-            try {
-                await apiFeedbackComment(contentId, text);
-                $modal.find('#pg-feedback-comment').val('');
-                toastr.success('评论已提交');
-            } catch (e) {
-                toastr.error('提交评论失败: ' + e.message);
+    showPGModal('反馈', html, ($modal) => {
+        // emoji 本地选择（不发请求）
+        $modal.on('click', '.pg-emoji-btn', function () {
+            const emoji = $(this).data('emoji');
+            if (selectedEmoji === emoji) {
+                // 取消选择
+                selectedEmoji = null;
+                $modal.find('.pg-emoji-btn').removeClass('selected');
+            } else {
+                selectedEmoji = emoji;
+                $modal.find('.pg-emoji-btn').removeClass('selected');
+                $(this).addClass('selected');
             }
         });
+    }, async () => {
+        // onSave — 一次性提交
+        const contentId = $('#pg-feedback-target').val();
+        const comment = $('#pg-feedback-comment').val().trim();
+
+        if (!selectedEmoji && !comment) {
+            toastr.warning('请至少选择一个反应或填写评论');
+            throw new Error('abort'); // 阻止关闭
+        }
+
+        try {
+            await apiFeedbackSubmit(contentId, {
+                emoji: selectedEmoji || undefined,
+                comment: comment || undefined,
+                messageContent: messageText || undefined,
+            });
+            toastr.success('反馈已发送');
+        } catch (e) {
+            if (e.message === 'abort') throw e;
+            toastr.error('发送失败: ' + e.message);
+            throw e; // 阻止关闭
+        }
     });
 }
 
@@ -3755,8 +3796,12 @@ function showPGModal(title, contentHtml, onRender, onSave) {
 
     if (onSave) {
         $modal.find('.pg-modal-save').on('click', async () => {
-            await onSave();
-            closePGModal();
+            try {
+                await onSave();
+                closePGModal();
+            } catch {
+                // onSave 抛出异常时不关闭弹窗
+            }
         });
     }
 
@@ -4017,7 +4062,7 @@ function startRegexRestoration() {
 //  初始化
 // ================================================================
 jQuery(async () => {
-    console.log('[PresetGuard] 扩展 v3.0 加载中...');
+    console.log('[PresetGuard] 扩展 v3.2 加载中...');
 
     // 渲染 UI
     renderSettingsPanel();
@@ -4069,5 +4114,28 @@ jQuery(async () => {
         }
     } catch { /* 事件类型不存在，忽略 */ }
 
-    console.log('[PresetGuard] 扩展 v3.0 已就绪');
+    // 聊天消息反馈按钮：事件委托 + 注入 + 监听新消息
+    $(document).on('click', '.pg_mes_feedback', function () {
+        const $mes = $(this).closest('.mes');
+        const messageText = $mes.find('.mes_text').text().trim();
+        showChatFeedbackModal(messageText);
+    });
+
+    injectChatFeedbackButtons();
+
+    // 监听新消息渲染，注入反馈按钮
+    try {
+        if (event_types.MESSAGE_RECEIVED) {
+            eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+                setTimeout(injectChatFeedbackButtons, 300);
+            });
+        }
+        if (event_types.CHAT_CHANGED) {
+            eventSource.on(event_types.CHAT_CHANGED, () => {
+                setTimeout(injectChatFeedbackButtons, 500);
+            });
+        }
+    } catch { /* 事件类型不存在，忽略 */ }
+
+    console.log('[PresetGuard] 扩展 v3.2 已就绪');
 });
