@@ -511,3 +511,153 @@
     text-align: center;
     margin-bottom: 8px;
 }
+
+/* ---- 聊天反馈弹窗 ---- */
+.pg-feedback-section {
+    margin-bottom: 14px;
+}
+
+.pg-feedback-section:last-child {
+    margin-bottom: 0;
+}
+
+.pg-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 0.9em;
+    color: var(--SmartThemeBodyColor, #ddd);
+}
+
+.pg-hint-text {
+    font-weight: 400;
+    opacity: 0.6;
+    font-size: 0.85em;
+}
+
+.pg-select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 4px;
+    background: var(--SmartThemeBlurTintColor, #1e1e1e);
+    color: var(--SmartThemeBodyColor, #ccc);
+    font-size: 0.9em;
+}
+
+.pg-message-preview {
+    background: var(--SmartThemeBlurTintColor, #1a1a1a);
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.85em;
+    line-height: 1.5;
+    max-height: 100px;
+    overflow-y: auto;
+    color: var(--SmartThemeBodyColor, #aaa);
+    opacity: 0.85;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.pg-feedback-content textarea {
+    width: 100%;
+    min-height: 60px;
+    resize: vertical;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 4px;
+    background: var(--SmartThemeBlurTintColor, #1e1e1e);
+    color: var(--SmartThemeBodyColor, #ccc);
+    padding: 8px;
+    font-size: 0.9em;
+    box-sizing: border-box;
+}
+
+/* ---- 聊天消息中的 PG 反馈按钮 ---- */
+.pg_mes_feedback {
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.pg_mes_feedback:hover {
+    opacity: 1;
+    color: #4caf50;
+}
+
+/* ---- 移动端响应式适配 ---- */
+@media screen and (max-width: 768px) {
+    .pg-modal {
+        width: 96%;
+        max-width: none;
+        max-height: 90vh;
+        border-radius: 6px;
+    }
+
+    .pg-modal-header {
+        padding: 10px 12px;
+    }
+
+    .pg-modal-header h3 {
+        font-size: 1em;
+    }
+
+    .pg-modal-body {
+        padding: 12px;
+    }
+
+    .pg-modal-footer {
+        padding: 10px 12px;
+        flex-wrap: wrap;
+    }
+
+    .pg-modal-footer .menu_button {
+        flex: 1;
+        min-width: 0;
+        text-align: center;
+    }
+
+    /* 加密配置 */
+    .pg-encrypt-config h4 {
+        font-size: 0.9em;
+    }
+
+    .pg-select-all-row {
+        flex-wrap: wrap;
+    }
+
+    /* emoji行 */
+    .pg-emoji-row {
+        flex-wrap: wrap;
+    }
+
+    .pg-emoji-btn {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    /* 内容安装对话框 */
+    .pg-content-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .pg-content-item .pg-install-btn {
+        align-self: flex-end;
+    }
+
+    /* 消息预览 */
+    .pg-message-preview {
+        max-height: 100px;
+        font-size: 0.85em;
+    }
+
+    /* 反馈弹窗 */
+    .pg-feedback-content textarea {
+        min-height: 50px;
+    }
+
+    .pg-select {
+        width: 100%;
+    }
+}

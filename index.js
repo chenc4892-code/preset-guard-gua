@@ -654,6 +654,378 @@ function clearVault() {
   }
 }
 
+/**
+ * 修复作者自己的内容：将 isProtected=true 的本地副本还原为明文
+ * 直接扫描本地所有内容，不依赖 installedContent 追踪
+ */
+async function repairOwnContent() {
+  if (!isAdmin()) return;
+
+  const settings = getSettings();
+  const sessionKey = extractSessionKey(settings.token);
+
+  // 从服务器获取作者自己创建的内容 ID 列表
+  let ownContentIds;
+  try {
+    const ownContent = await pgFetch('/api/content?scope=own');
+    ownContentIds = new Set(ownContent.map(c => c.id));
+  } catch (e) {
+    console.warn('[PresetGuard] 无法获取自己的内容列表，跳过修复:', e);
+    return;
+  }
+
+  if (ownContentIds.size === 0) return;
+  console.log(`[PresetGuard] 作者拥有 ${ownContentIds.size} 项内容，开始检查本地副本...`);
+
+  let repaired = 0;
+
+  /**
+   * 确保 vault 中有指定 contentId 的数据
+   * 如果没有，从服务器下载并构建 vault 条目
+   */
+  async function ensureVault(contentId, type, encryptedFields) {
+    if (vault[contentId] && Object.keys(vault[contentId]).length > 0) return true;
+    if (!sessionKey) return false;
+    try {
+      const downloadData = await apiDownloadContent(contentId);
+      const decryptedStr = await decryptTransport(
+        downloadData.transportEncrypted, sessionKey,
+      );
+      const fullContent = JSON.parse(decryptedStr);
+      const ef = downloadData.encryptedFields || encryptedFields || {};
+      buildVaultEntry(type, contentId, fullContent, ef);
+      console.log(`[PresetGuard] 修复: 从服务器补充 vault ${type}:${contentId}`);
+      return true;
+    } catch (e) {
+      console.warn(`[PresetGuard] 修复: 无法下载 ${contentId}:`, e);
+      return false;
+    }
+  }
+
+  // ---- 修复预设：直接扫描 openai_settings ----
+  for (let idx = 0; idx < openai_settings.length; idx++) {
+    const preset = openai_settings[idx];
+    if (!preset?.extensions?.presetGuard) continue;
+
+    const pgData = preset.extensions.presetGuard;
+    if (!pgData.isProtected) continue;
+
+    const contentId = pgData.contentId || pgData.presetId;
+    if (!contentId || !ownContentIds.has(contentId)) continue;
+
+    // 反查预设名称
+    const presetName = Object.entries(openai_setting_names)
+      .find(([, i]) => i === idx)?.[0];
+    if (!presetName) {
+      console.warn(`[PresetGuard] 修复: 预设 idx=${idx} 无法找到名称，跳过`);
+      continue;
+    }
+
+    // 确保 vault 数据可用
+    const ef = pgData.encryptedFields ||
+      settings.installedContent?.preset?.[contentId]?.encryptedFields || {};
+    if (!(await ensureVault(contentId, 'preset', ef))) {
+      console.warn(`[PresetGuard] 修复: 预设 "${presetName}" vault 不可用，跳过`);
+      continue;
+    }
+
+    console.log(`[PresetGuard] 修复作者预设: "${presetName}" (idx=${idx}, id=${contentId})`);
+
+    // 还原提示词条目
+    if (preset.prompts) {
+      for (const prompt of preset.prompts) {
+        if (typeof prompt.content === 'string' && prompt.content.includes('🔒PG:')) {
+          const match = prompt.content.match(/🔒PG:([^:]+):(.+)/);
+          if (match) {
+            const [, cid, fid] = match;
+            if (vault[cid]?.[fid]) prompt.content = vault[cid][fid];
+          }
+        }
+      }
+    }
+
+    // 还原根级字段
+    for (const [key, val] of Object.entries(preset)) {
+      if (typeof val === 'string' && val.includes('🔒PG:')) {
+        const match = val.match(/🔒PG:([^:]+):(.+)/);
+        if (match) {
+          const [, cid, fid] = match;
+          if (vault[cid]?.[fid]) preset[key] = vault[cid][fid];
+        }
+      }
+    }
+
+    pgData.isProtected = false;
+
+    try {
+      await savePresetToTavern(presetName, preset);
+      repaired++;
+    } catch (e) {
+      console.error(`[PresetGuard] 修复预设 "${presetName}" 失败:`, e);
+    }
+  }
+
+  // ---- 修复世界书：通过 installedContent 定位 ----
+  for (const [contentId, info] of Object.entries(settings.installedContent.worldbook || {})) {
+    if (!ownContentIds.has(contentId)) continue;
+
+    const wbName = info.localName;
+    if (!wbName) continue;
+
+    try {
+      const resp = await fetch('/api/worldinfo/get', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name: wbName }),
+      });
+      if (!resp.ok) {
+        console.warn(`[PresetGuard] 修复: 世界书 "${wbName}" 读取失败 (${resp.status})`);
+        continue;
+      }
+      const wbData = await resp.json();
+
+      if (!wbData._presetGuard?.isProtected) continue;
+
+      // 确保 vault 数据可用
+      const ef = wbData._presetGuard.encryptedFields || info.encryptedFields || {};
+      if (!(await ensureVault(contentId, 'worldbook', ef))) {
+        console.warn(`[PresetGuard] 修复: 世界书 "${wbName}" vault 不可用，跳过`);
+        continue;
+      }
+
+      console.log(`[PresetGuard] 修复作者世界书: "${wbName}" (id=${contentId})`);
+
+      // 还原条目内容
+      if (wbData.entries) {
+        for (const [, entry] of Object.entries(wbData.entries)) {
+          if (typeof entry.content === 'string' && entry.content.includes('🔒PG:')) {
+            const match = entry.content.match(/🔒PG:([^:]+):(.+)/);
+            if (match) {
+              const [, cid, fid] = match;
+              if (vault[cid]?.[fid]) entry.content = vault[cid][fid];
+            }
+          }
+        }
+      }
+
+      wbData._presetGuard.isProtected = false;
+
+      await fetch('/api/worldinfo/edit', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name: wbName, data: wbData }),
+      });
+
+      repaired++;
+    } catch (e) {
+      console.error(`[PresetGuard] 修复世界书 "${wbName}" 失败:`, e);
+    }
+  }
+
+  // ---- 修复主题：获取所有主题一次性扫描 ----
+  let allThemes = null;
+  try {
+    const resp = await fetch('/api/settings/get', {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({}),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      allThemes = data.themes || [];
+    }
+  } catch { /* ignore */ }
+
+  if (allThemes) {
+    for (const themeData of allThemes) {
+      if (!themeData._presetGuard?.isProtected) continue;
+
+      const contentId = themeData._presetGuard.contentId;
+      if (!contentId || !ownContentIds.has(contentId)) continue;
+
+      const thName = themeData.name;
+
+      // 确保 vault 数据可用
+      const ef = themeData._presetGuard.encryptedFields
+        || settings.installedContent?.theme?.[contentId]?.encryptedFields || {};
+      if (!(await ensureVault(contentId, 'theme', ef))) {
+        console.warn(`[PresetGuard] 修复: 主题 "${thName}" vault 不可用，跳过`);
+        continue;
+      }
+
+      console.log(`[PresetGuard] 修复作者主题: "${thName}" (id=${contentId})`);
+
+      // 还原加密字段
+      if (ef.fields) {
+        for (const fieldName of ef.fields) {
+          if (vault[contentId]?.[fieldName] !== undefined) {
+            themeData[fieldName] = vault[contentId][fieldName];
+          }
+        }
+      }
+
+      // 通用占位符扫描（以防 encryptedFields 不完整）
+      for (const [key, val] of Object.entries(themeData)) {
+        if (typeof val === 'string' && val.includes('🔒PG:')) {
+          const match = val.match(/🔒PG:([^:]+):(.+)/);
+          if (match) {
+            const [, cid, fid] = match;
+            if (vault[cid]?.[fid]) themeData[key] = vault[cid][fid];
+          }
+        }
+      }
+
+      themeData._presetGuard.isProtected = false;
+
+      try {
+        await fetch('/api/themes/save', {
+          method: 'POST',
+          headers: getRequestHeaders(),
+          body: JSON.stringify(themeData),
+        });
+        repaired++;
+      } catch (e) {
+        console.error(`[PresetGuard] 修复主题 "${thName}" 失败:`, e);
+      }
+    }
+  }
+
+  // ---- 修复角色：扫描已安装角色 ----
+  for (const [contentId, info] of Object.entries(settings.installedContent.character || {})) {
+    if (!ownContentIds.has(contentId)) continue;
+
+    const localName = info.localName;
+    if (!localName) continue;
+
+    try {
+      // 在角色列表中查找文件名
+      const context = getContext();
+      const charBasic = context.characters?.find(c =>
+        c.name === localName || c.avatar?.replace('.png', '') === localName,
+      );
+      if (!charBasic?.avatar) continue;
+
+      const resp = await fetch('/api/characters/get', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ avatar_url: charBasic.avatar }),
+      });
+      if (!resp.ok) continue;
+      const fullChar = await resp.json();
+      const charData = fullChar.data || fullChar;
+
+      if (!charData.extensions?.presetGuard?.isProtected) continue;
+
+      // 确保 vault 数据可用
+      const ef = charData.extensions.presetGuard.encryptedFields || info.encryptedFields || {};
+      if (!(await ensureVault(contentId, 'character', ef))) {
+        console.warn(`[PresetGuard] 修复: 角色 "${localName}" vault 不可用，跳过`);
+        continue;
+      }
+
+      console.log(`[PresetGuard] 修复作者角色: "${localName}" (id=${contentId})`);
+
+      // 还原字段
+      let changed = false;
+      if (ef.fields) {
+        for (const fieldName of ef.fields) {
+          if (vault[contentId]?.[fieldName] !== undefined) {
+            charData[fieldName] = vault[contentId][fieldName];
+            changed = true;
+          }
+        }
+      }
+
+      // 还原角色世界书条目
+      if (ef.characterBookEntries && charData.character_book?.entries) {
+        const entries = charData.character_book.entries;
+        for (const uid of ef.characterBookEntries) {
+          const entry = Array.isArray(entries)
+            ? entries.find(e => e.uid === uid || e.id === uid)
+            : entries[String(uid)];
+          if (entry && typeof entry.content === 'string' && entry.content.includes('🔒PG:')) {
+            if (vault[contentId]?.[`cb_entry_${uid}`]) {
+              entry.content = vault[contentId][`cb_entry_${uid}`];
+              changed = true;
+            }
+          }
+        }
+      }
+
+      // 还原正则脚本
+      if (ef.regexScripts && charData.extensions?.regex_scripts) {
+        for (const idx of ef.regexScripts) {
+          if (vault[contentId]?.[`regex_${idx}`]) {
+            charData.extensions.regex_scripts[idx] = structuredClone(vault[contentId][`regex_${idx}`]);
+            changed = true;
+          }
+        }
+      }
+
+      if (!changed) continue;
+
+      charData.extensions.presetGuard.isProtected = false;
+
+      // 构建 V2 JSON 用于保存
+      const v2Json = {
+        spec: 'chara_card_v2',
+        spec_version: '2.0',
+        data: charData,
+        name: charData.name || localName,
+        description: charData.description || '',
+        personality: charData.personality || '',
+        scenario: charData.scenario || '',
+        first_mes: charData.first_mes || '',
+        mes_example: charData.mes_example || '',
+      };
+
+      const editForm = new FormData();
+      editForm.append('avatar_url', charBasic.avatar);
+      editForm.append('json_data', JSON.stringify(v2Json));
+      editForm.append('ch_name', charData.name || localName);
+      const charFields = ['description', 'personality', 'scenario', 'first_mes',
+        'mes_example', 'system_prompt', 'post_history_instructions',
+        'creator_notes', 'creator', 'character_version'];
+      for (const f of charFields) {
+        editForm.append(f, charData[f] || '');
+      }
+      editForm.append('tags', Array.isArray(charData.tags) ? charData.tags.join(',') : '');
+      editForm.append('talkativeness', String(charData.talkativeness ?? 0.5));
+      editForm.append('fav', String(charBasic.fav ?? false));
+      editForm.append('extensions', JSON.stringify(charData.extensions || {}));
+      if (Array.isArray(charData.alternate_greetings)) {
+        for (const g of charData.alternate_greetings) {
+          editForm.append('alternate_greetings', g);
+        }
+      }
+
+      const editHeaders = getRequestHeaders();
+      delete editHeaders['Content-Type'];
+
+      const editResp = await fetch('/api/characters/edit', {
+        method: 'POST',
+        headers: editHeaders,
+        body: editForm,
+      });
+
+      if (editResp.ok) {
+        repaired++;
+      } else {
+        console.error(`[PresetGuard] 修复角色 "${localName}" 保存失败: ${editResp.status}`);
+      }
+    } catch (e) {
+      console.error(`[PresetGuard] 修复角色 "${localName}" 失败:`, e);
+    }
+  }
+
+  if (repaired > 0) {
+    console.log(`[PresetGuard] 已修复 ${repaired} 项作者内容`);
+    toastr.success(`已自动修复 ${repaired} 项作者内容的加密状态`);
+  } else {
+    console.log('[PresetGuard] 所有作者内容均正常，无需修复');
+  }
+}
+
 // ================================================================
 //  预设操作（保留原有功能）
 // ================================================================
@@ -823,7 +1195,21 @@ async function pushPreset(changelogMessage) {
 
     const protectedPreset = createProtectedPreset(cleanPreset, encryptedFields, pid);
     protectedPreset.extensions.presetGuard.version = result.version;
-    await savePresetToTavern(presetName, protectedPreset);
+
+    // 作者自己保留明文，不使用受保护副本
+    if (isSuperAdmin() || !pgData?.isProtected) {
+      const authorPreset = structuredClone(cleanPreset);
+      if (!authorPreset.extensions) authorPreset.extensions = {};
+      authorPreset.extensions.presetGuard = {
+        contentId: pid,
+        version: result.version,
+        encryptedFields,
+        isProtected: false,
+      };
+      await savePresetToTavern(presetName, authorPreset);
+    } else {
+      await savePresetToTavern(presetName, protectedPreset);
+    }
 
     buildVaultEntry('preset', pid, cleanPreset, encryptedFields);
 
@@ -844,7 +1230,17 @@ async function pushPreset(changelogMessage) {
 
     const protectedPreset = createProtectedPreset(cleanPreset, encryptedFields, result.id);
     protectedPreset.extensions.presetGuard.version = '1.0.0';
-    await savePresetToTavern(presetName, protectedPreset);
+
+    // 作者自己保留明文
+    const authorPreset = structuredClone(cleanPreset);
+    if (!authorPreset.extensions) authorPreset.extensions = {};
+    authorPreset.extensions.presetGuard = {
+      contentId: result.id,
+      version: '1.0.0',
+      encryptedFields,
+      isProtected: false,
+    };
+    await savePresetToTavern(presetName, authorPreset);
 
     buildVaultEntry('preset', result.id, cleanPreset, encryptedFields);
 
@@ -1583,10 +1979,25 @@ async function pushWorldBook(worldBookName, changelogMessage) {
 
     const protectedWorld = createProtectedWorldBook(cleanData, encryptedFields, existingId);
     protectedWorld._presetGuard.version = result.version;
+
+    // 作者自己保留明文
+    const pgMeta = fullWorldData._presetGuard;
+    const saveData = (isSuperAdmin() || !pgMeta?.isProtected) ? (() => {
+      const authorWorld = structuredClone(cleanData);
+      authorWorld._presetGuard = {
+        contentId: existingId,
+        version: result.version,
+        encryptedFields,
+        isProtected: false,
+        type: 'worldbook',
+      };
+      return authorWorld;
+    })() : protectedWorld;
+
     await fetch('/api/worldinfo/edit', {
       method: 'POST',
       headers: getRequestHeaders(),
-      body: JSON.stringify({ name: worldBookName, data: protectedWorld }),
+      body: JSON.stringify({ name: worldBookName, data: saveData }),
     });
 
     buildVaultEntry('worldbook', existingId, cleanData, encryptedFields);
@@ -1607,10 +2018,21 @@ async function pushWorldBook(worldBookName, changelogMessage) {
 
     const protectedWorld = createProtectedWorldBook(cleanData, encryptedFields, result.id);
     protectedWorld._presetGuard.version = '1.0.0';
+
+    // 作者自己保留明文
+    const authorWorld = structuredClone(cleanData);
+    authorWorld._presetGuard = {
+      contentId: result.id,
+      version: '1.0.0',
+      encryptedFields,
+      isProtected: false,
+      type: 'worldbook',
+    };
+
     await fetch('/api/worldinfo/edit', {
       method: 'POST',
       headers: getRequestHeaders(),
-      body: JSON.stringify({ name: worldBookName, data: protectedWorld }),
+      body: JSON.stringify({ name: worldBookName, data: authorWorld }),
     });
 
     buildVaultEntry('worldbook', result.id, cleanData, encryptedFields);
@@ -1811,10 +2233,27 @@ async function pushTheme(themeName, changelogMessage) {
   protectedTheme._presetGuard.version = result.version || '1.0.0';
   protectedTheme.name = themeName;
 
+  // 作者自己保留明文
+  const pgMeta = themeData._presetGuard;
+  let saveTheme;
+  if (isSuperAdmin() || !pgMeta?.isProtected) {
+    saveTheme = structuredClone(uploadData);
+    saveTheme._presetGuard = {
+      contentId: newContentId,
+      version: result.version || '1.0.0',
+      encryptedFields,
+      isProtected: false,
+      type: 'theme',
+    };
+    saveTheme.name = themeName;
+  } else {
+    saveTheme = protectedTheme;
+  }
+
   await fetch('/api/themes/save', {
     method: 'POST',
     headers: getRequestHeaders(),
-    body: JSON.stringify(protectedTheme),
+    body: JSON.stringify(saveTheme),
   });
 
   buildVaultEntry('theme', newContentId, uploadData, encryptedFields);
@@ -1870,7 +2309,7 @@ function installFetchInterceptor() {
   window.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : input?.url || '';
 
-    // ---- 1. AI 请求拦截：替换占位符 ----
+    // ---- 1. AI 请求拦截：替换占位符（递归深度替换，覆盖所有字段） ----
     const shouldIntercept = INTERCEPT_URLS.some(u => url.includes(u));
 
     if (shouldIntercept && init?.body) {
@@ -1880,48 +2319,40 @@ function installFetchInterceptor() {
           : new TextDecoder().decode(init.body);
 
         if (bodyStr.includes('🔒PG:')) {
-          const body = JSON.parse(bodyStr);
           let replaced = false;
 
-          if (Array.isArray(body.messages)) {
-            for (const msg of body.messages) {
-              if (typeof msg.content === 'string' && msg.content.includes('🔒PG:')) {
-                msg.content = msg.content.replace(
+          const deepReplace = (obj) => {
+            if (typeof obj === 'string') {
+              if (obj.includes('🔒PG:')) {
+                const result = obj.replace(
                   PG_PLACEHOLDER_RE,
                   (match, contentId, fieldId) => {
                     const real = vault[contentId]?.[fieldId];
-                    if (real) { replaced = true; return real; }
+                    if (real) { replaced = true; return typeof real === 'string' ? real : match; }
                     return match;
                   },
                 );
+                return result;
               }
-              if (Array.isArray(msg.content)) {
-                for (const part of msg.content) {
-                  if (part.type === 'text' && typeof part.text === 'string' && part.text.includes('🔒PG:')) {
-                    part.text = part.text.replace(
-                      PG_PLACEHOLDER_RE,
-                      (match, contentId, fieldId) => {
-                        const real = vault[contentId]?.[fieldId];
-                        if (real) { replaced = true; return real; }
-                        return match;
-                      },
-                    );
-                  }
-                }
-              }
+              return obj;
             }
-          }
+            if (Array.isArray(obj)) {
+              for (let i = 0; i < obj.length; i++) {
+                obj[i] = deepReplace(obj[i]);
+              }
+              return obj;
+            }
+            if (obj && typeof obj === 'object') {
+              for (const key of Object.keys(obj)) {
+                obj[key] = deepReplace(obj[key]);
+              }
+              return obj;
+            }
+            return obj;
+          };
 
-          if (typeof body.prompt === 'string' && body.prompt.includes('🔒PG:')) {
-            body.prompt = body.prompt.replace(
-              PG_PLACEHOLDER_RE,
-              (match, contentId, fieldId) => {
-                const real = vault[contentId]?.[fieldId];
-                if (real) { replaced = true; return real; }
-                return match;
-              },
-            );
-          }
+          const body = JSON.parse(bodyStr);
+          deepReplace(body);
 
           if (replaced) {
             console.log('[PresetGuard] 已替换请求中的加密占位符');
@@ -2438,6 +2869,7 @@ function bindSettingsEvents() {
       await apiLogin(username, password);
       toastr.success('登录成功');
       await populateVault();
+      await repairOwnContent();
       updateSettingsUI();
       applyOcclusion();
     } catch (e) {
@@ -4130,10 +4562,11 @@ jQuery(async () => {
   // 启动正则脚本运行时恢复
   startRegexRestoration();
 
-  // 若已登录，从服务器加载 Vault
+  // 若已登录，从服务器加载 Vault 并修复作者内容
   if (isLoggedIn()) {
     try {
       await populateVault();
+      await repairOwnContent();
     } catch (e) {
       console.error('[PresetGuard] Vault 初始化失败:', e);
     }
