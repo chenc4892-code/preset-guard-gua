@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "金瓜瓜@gua.guagua.uk",
-  "version": "3.3.3",
+  "version": "3.3.0",
   "homePage": "https://github.com/chenc4892-code/preset-guard-gua.git",
   "auto_update": true
 }
