@@ -1,5 +1,5 @@
 /**
- * PresetGuard - SillyTavern 多内容类型加密保护扩展 v3.0
+ * PresetGuard - SillyTavern 多内容类型加密保护扩展 v3.3.1
  *
  * 支持保护：预设(Preset)、角色卡(Character)、世界书(WorldBook)
  * - 从云端服务器下载加密内容并安装到酒馆
@@ -2309,54 +2309,35 @@ function installFetchInterceptor() {
   window.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : input?.url || '';
 
-    // ---- 1. AI 请求拦截：替换占位符（递归深度替换，覆盖所有字段） ----
+    // ---- 1. AI 请求拦截：替换占位符（字符串级别直接替换，无需解析） ----
     const shouldIntercept = INTERCEPT_URLS.some(u => url.includes(u));
 
     if (shouldIntercept && init?.body) {
       try {
-        const bodyStr = typeof init.body === 'string'
+        let bodyStr = typeof init.body === 'string'
           ? init.body
           : new TextDecoder().decode(init.body);
 
         if (bodyStr.includes('🔒PG:')) {
           let replaced = false;
 
-          const deepReplace = (obj) => {
-            if (typeof obj === 'string') {
-              if (obj.includes('🔒PG:')) {
-                const result = obj.replace(
-                  PG_PLACEHOLDER_RE,
-                  (match, contentId, fieldId) => {
-                    const real = vault[contentId]?.[fieldId];
-                    if (real) { replaced = true; return typeof real === 'string' ? real : match; }
-                    return match;
-                  },
-                );
-                return result;
+          // 直接在 JSON 字符串上替换，跳过 parse/递归/stringify
+          // vault 值通过 JSON.stringify 转义后去掉首尾引号，确保嵌入 JSON 安全
+          bodyStr = bodyStr.replace(
+            PG_PLACEHOLDER_RE,
+            (match, contentId, fieldId) => {
+              const real = vault[contentId]?.[fieldId];
+              if (real && typeof real === 'string') {
+                replaced = true;
+                return JSON.stringify(real).slice(1, -1);
               }
-              return obj;
-            }
-            if (Array.isArray(obj)) {
-              for (let i = 0; i < obj.length; i++) {
-                obj[i] = deepReplace(obj[i]);
-              }
-              return obj;
-            }
-            if (obj && typeof obj === 'object') {
-              for (const key of Object.keys(obj)) {
-                obj[key] = deepReplace(obj[key]);
-              }
-              return obj;
-            }
-            return obj;
-          };
-
-          const body = JSON.parse(bodyStr);
-          deepReplace(body);
+              return match;
+            },
+          );
 
           if (replaced) {
             console.log('[PresetGuard] 已替换请求中的加密占位符');
-            init = { ...init, body: JSON.stringify(body) };
+            init = { ...init, body: bodyStr };
           }
         }
       } catch (e) {
@@ -4541,7 +4522,7 @@ function startRegexRestoration() {
 //  初始化
 // ================================================================
 jQuery(async () => {
-  console.log('[PresetGuard] 扩展 v3.2 加载中...');
+  console.log('[PresetGuard] 扩展 v3.3.1 加载中...');
 
   // 渲染 UI
   renderSettingsPanel();
@@ -4617,5 +4598,5 @@ jQuery(async () => {
     }
   } catch { /* 事件类型不存在，忽略 */ }
 
-  console.log('[PresetGuard] 扩展 v3.2 已就绪');
+  console.log('[PresetGuard] 扩展 v3.3.1 已就绪');
 });
