@@ -1159,7 +1159,7 @@ async function pushPreset(changelogMessage) {
   const cleanPreset = structuredClone(currentPreset);
 
   // 还原占位符
-  const pid = pgData?.contentId || pgData?.presetId;
+  let pid = pgData?.contentId || pgData?.presetId;
   if (pgData?.isProtected && pid && vault[pid]) {
     if (cleanPreset.prompts) {
       for (const prompt of cleanPreset.prompts) {
@@ -1186,44 +1186,58 @@ async function pushPreset(changelogMessage) {
   }
 
   if (pid) {
-    const result = await apiUpdatePreset(pid, {
-      name: presetName,
-      content: cleanPreset,
-      encryptedFields,
-      changelogMessage: changelogMessage || undefined,
-    });
-
-    const protectedPreset = createProtectedPreset(cleanPreset, encryptedFields, pid);
-    protectedPreset.extensions.presetGuard.version = result.version;
-
-    // 作者自己保留明文，不使用受保护副本
-    if (isSuperAdmin() || !pgData?.isProtected) {
-      const authorPreset = structuredClone(cleanPreset);
-      if (!authorPreset.extensions) authorPreset.extensions = {};
-      authorPreset.extensions.presetGuard = {
-        contentId: pid,
-        version: result.version,
+    let result;
+    try {
+      result = await apiUpdatePreset(pid, {
+        name: presetName,
+        content: cleanPreset,
         encryptedFields,
-        isProtected: false,
-      };
-      await savePresetToTavern(presetName, authorPreset);
-    } else {
-      await savePresetToTavern(presetName, protectedPreset);
+        changelogMessage: changelogMessage || undefined,
+      });
+    } catch (err) {
+      if (/** @type {any} */ (err).status === 404) {
+        console.warn(`[PresetGuard] 服务器上预设 ${pid} 已不存在，回退为创建新预设`);
+        pid = null;
+      } else {
+        throw err;
+      }
     }
 
-    buildVaultEntry('preset', pid, cleanPreset, encryptedFields);
+    if (pid && result) {
+      const protectedPreset = createProtectedPreset(cleanPreset, encryptedFields, pid);
+      protectedPreset.extensions.presetGuard.version = result.version;
 
-    settings.installedContent.preset[pid] = {
-      localName: presetName,
-      version: result.version,
-      encryptedFields,
-    };
-    settings.installedPresets[pid] = settings.installedContent.preset[pid];
-    settings._pendingEncryptedFields = null;
-    saveSettings();
-    return result;
+      // 作者自己保留明文，不使用受保护副本
+      if (isSuperAdmin() || !pgData?.isProtected) {
+        const authorPreset = structuredClone(cleanPreset);
+        if (!authorPreset.extensions) authorPreset.extensions = {};
+        authorPreset.extensions.presetGuard = {
+          contentId: pid,
+          version: result.version,
+          encryptedFields,
+          isProtected: false,
+        };
+        await savePresetToTavern(presetName, authorPreset);
+      } else {
+        await savePresetToTavern(presetName, protectedPreset);
+      }
 
-  } else {
+      buildVaultEntry('preset', pid, cleanPreset, encryptedFields);
+
+      settings.installedContent.preset[pid] = {
+        localName: presetName,
+        version: result.version,
+        encryptedFields,
+      };
+      settings.installedPresets[pid] = settings.installedContent.preset[pid];
+      settings._pendingEncryptedFields = null;
+      saveSettings();
+      return result;
+    }
+  }
+
+  // pid 为空 或 更新返回 404 回退到创建
+  {
     const result = await apiCreatePreset(
       presetName, '', cleanPreset, encryptedFields,
     );
@@ -1793,7 +1807,7 @@ async function pushCharacter(changelogMessage) {
     result: JSON.stringify(encryptedFields),
   });
 
-  const existingId = charData.extensions?.presetGuard?.contentId ||
+  let existingId = charData.extensions?.presetGuard?.contentId ||
     findContentIdByLocalName('character', uploadContent.name);
 
   // 推送前最终验证
@@ -1818,25 +1832,40 @@ async function pushCharacter(changelogMessage) {
   });
 
   if (existingId) {
-    const result = await apiUpdateContent(existingId, {
-      name: uploadContent.name,
-      content: uploadContent,
-      encryptedFields,
-      changelogMessage: changelogMessage || undefined,
-    });
+    let result;
+    try {
+      result = await apiUpdateContent(existingId, {
+        name: uploadContent.name,
+        content: uploadContent,
+        encryptedFields,
+        changelogMessage: changelogMessage || undefined,
+      });
+    } catch (err) {
+      if (/** @type {any} */ (err).status === 404) {
+        console.warn(`[PresetGuard] 服务器上角色 ${existingId} 已不存在，回退为创建`);
+        existingId = null;
+      } else {
+        throw err;
+      }
+    }
 
-    buildVaultEntry('character', existingId, uploadContent, encryptedFields);
+    if (existingId && result) {
+      buildVaultEntry('character', existingId, uploadContent, encryptedFields);
 
-    settings.installedContent.character[existingId] = {
-      localName: uploadContent.name,
-      version: result.version,
-      encryptedFields,
-    };
-    settings._pendingEncryptedFields = null;
-    settings._pendingContentType = null;
-    saveSettings();
-    return result;
-  } else {
+      settings.installedContent.character[existingId] = {
+        localName: uploadContent.name,
+        version: result.version,
+        encryptedFields,
+      };
+      settings._pendingEncryptedFields = null;
+      settings._pendingContentType = null;
+      saveSettings();
+      return result;
+    }
+  }
+
+  // existingId 为空 或 更新返回 404 回退到创建
+  {
     const result = await apiCreateContent(
       'character', uploadContent.name, '', uploadContent, encryptedFields,
     );
@@ -1966,52 +1995,67 @@ async function pushWorldBook(worldBookName, changelogMessage) {
   const cleanData = structuredClone(fullWorldData);
   delete cleanData._presetGuard;
 
-  const existingId = fullWorldData._presetGuard?.contentId ||
+  let existingId = fullWorldData._presetGuard?.contentId ||
     findContentIdByLocalName('worldbook', worldBookName);
 
   if (existingId) {
-    const result = await apiUpdateContent(existingId, {
-      name: worldBookName,
-      content: cleanData,
-      encryptedFields,
-      changelogMessage: changelogMessage || undefined,
-    });
+    let result;
+    try {
+      result = await apiUpdateContent(existingId, {
+        name: worldBookName,
+        content: cleanData,
+        encryptedFields,
+        changelogMessage: changelogMessage || undefined,
+      });
+    } catch (err) {
+      if (/** @type {any} */ (err).status === 404) {
+        console.warn(`[PresetGuard] 服务器上世界书 ${existingId} 已不存在，回退为创建`);
+        existingId = null;
+      } else {
+        throw err;
+      }
+    }
 
-    const protectedWorld = createProtectedWorldBook(cleanData, encryptedFields, existingId);
-    protectedWorld._presetGuard.version = result.version;
+    if (existingId && result) {
+      const protectedWorld = createProtectedWorldBook(cleanData, encryptedFields, existingId);
+      protectedWorld._presetGuard.version = result.version;
 
-    // 作者自己保留明文
-    const pgMeta = fullWorldData._presetGuard;
-    const saveData = (isSuperAdmin() || !pgMeta?.isProtected) ? (() => {
-      const authorWorld = structuredClone(cleanData);
-      authorWorld._presetGuard = {
-        contentId: existingId,
+      // 作者自己保留明文
+      const pgMeta = fullWorldData._presetGuard;
+      const saveData = (isSuperAdmin() || !pgMeta?.isProtected) ? (() => {
+        const authorWorld = structuredClone(cleanData);
+        authorWorld._presetGuard = {
+          contentId: existingId,
+          version: result.version,
+          encryptedFields,
+          isProtected: false,
+          type: 'worldbook',
+        };
+        return authorWorld;
+      })() : protectedWorld;
+
+      await fetch('/api/worldinfo/edit', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name: worldBookName, data: saveData }),
+      });
+
+      buildVaultEntry('worldbook', existingId, cleanData, encryptedFields);
+
+      settings.installedContent.worldbook[existingId] = {
+        localName: worldBookName,
         version: result.version,
         encryptedFields,
-        isProtected: false,
-        type: 'worldbook',
       };
-      return authorWorld;
-    })() : protectedWorld;
+      settings._pendingEncryptedFields = null;
+      settings._pendingContentType = null;
+      saveSettings();
+      return result;
+    }
+  }
 
-    await fetch('/api/worldinfo/edit', {
-      method: 'POST',
-      headers: getRequestHeaders(),
-      body: JSON.stringify({ name: worldBookName, data: saveData }),
-    });
-
-    buildVaultEntry('worldbook', existingId, cleanData, encryptedFields);
-
-    settings.installedContent.worldbook[existingId] = {
-      localName: worldBookName,
-      version: result.version,
-      encryptedFields,
-    };
-    settings._pendingEncryptedFields = null;
-    settings._pendingContentType = null;
-    saveSettings();
-    return result;
-  } else {
+  // existingId 为空 或 更新返回 404 回退到创建
+  {
     const result = await apiCreateContent(
       'worldbook', worldBookName, '', cleanData, encryptedFields,
     );
@@ -2203,15 +2247,26 @@ async function pushTheme(themeName, changelogMessage) {
 
   console.log(`[PresetGuard] 推送主题 "${themeName}": custom_css 长度=${(uploadData.custom_css || '').length}, 字段数=${Object.keys(uploadData).length}`);
 
+  let effectiveContentId = contentId;
   let result;
-  if (contentId) {
-    result = await apiUpdateContent(contentId, {
-      name: themeName,
-      content: uploadData,
-      encryptedFields,
-      changelogMessage: changelogMessage || undefined,
-    });
-  } else {
+  if (effectiveContentId) {
+    try {
+      result = await apiUpdateContent(effectiveContentId, {
+        name: themeName,
+        content: uploadData,
+        encryptedFields,
+        changelogMessage: changelogMessage || undefined,
+      });
+    } catch (err) {
+      if (/** @type {any} */ (err).status === 404) {
+        console.warn(`[PresetGuard] 服务器上主题 ${effectiveContentId} 已不存在，回退为创建`);
+        effectiveContentId = null;
+      } else {
+        throw err;
+      }
+    }
+  }
+  if (!effectiveContentId) {
     result = await apiCreateContent(
       'theme', themeName,
       settings._pendingDescription || '',
